@@ -85,13 +85,7 @@ func init() {
 		os.Exit(1)
 	}
 
-	_, err = dbRW.Exec(context.Background(), string(body))
-
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Unable to execute database functions: %v\n", err)
-		os.Exit(1)
-	}
-
+	dbRW.Exec(context.Background(), string(body))
 }
 
 func main() {
@@ -116,7 +110,6 @@ func main() {
 	clientesRoute := router.Group("/clientes/:id", validaId)
 
 	{
-
 		clientesRoute.GET("/extrato", func(c *gin.Context) {
 			var result string
 
