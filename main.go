@@ -47,8 +47,8 @@ func validaId(ctx *gin.Context) {
 	ctx.Next()
 }
 
-var ATUALIZA_SALDO_QUERY string = "SELECT atualiza_saldo($1,$2,$3,$4) AS result"
-var GERA_EXTRATO_QUERY string = "SELECT gera_extrato($1) AS result"
+var ATUALIZA_SALDO_QUERY string = "SELECT s, l FROM atualiza_saldo($1,$2,$3,$4)"
+var GERA_EXTRATO_QUERY string = "SELECT result FROM extratos WHERE id = $1"
 
 func init() {
 	gotenv.Load()
@@ -70,6 +70,9 @@ func init() {
 
 	poolConfigRW.MinConns = 1
 	poolConfigRW.MaxConns = int32(maxRWConnections)
+
+	poolConfigRW.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheDescribe
+	poolConfigRW.ConnConfig.DescriptionCacheCapacity = 1024
 
 	dbRW, err = pgxpool.NewWithConfig(context.Background(), poolConfigRW)
 
@@ -94,19 +97,6 @@ func main() {
 
 	router.Use(gin.Recovery())
 
-	router.GET("/healthcheck", func(c *gin.Context) {
-		var result string
-
-		err := dbRW.QueryRow(context.Background(), GERA_EXTRATO_QUERY, 1).Scan(&result)
-
-		if err != nil {
-			c.AbortWithError(http.StatusBadRequest, err)
-			return
-		}
-
-		c.String(http.StatusOK, "")
-	})
-
 	clientesRoute := router.Group("/clientes/:id", validaId)
 
 	{
@@ -125,8 +115,7 @@ func main() {
 				return
 			}
 
-			c.Header("Content-Type", "application/json")
-			c.String(http.StatusOK, result)
+			c.Data(http.StatusOK, gin.MIMEJSON, []byte(result))
 		})
 
 		clientesRoute.POST("/transacoes", func(c *gin.Context) {
@@ -153,18 +142,24 @@ func main() {
 				return
 			}
 
-			var result string
+			var s int
+			var l int
 
-			err := dbRW.QueryRow(context.Background(), ATUALIZA_SALDO_QUERY, c.MustGet("id").(int), payload.Tipo, payload.Valor, payload.Descricao).Scan(&result)
+			id := c.MustGet("id").(int)
+
+			err := dbRW.QueryRow(context.Background(), ATUALIZA_SALDO_QUERY, id, payload.Tipo, payload.Valor, payload.Descricao).Scan(&s, &l)
 
 			if err != nil {
 				c.AbortWithError(http.StatusUnprocessableEntity, err)
 				return
 			}
 
-			c.Header("Content-Type", "application/json")
-			c.String(http.StatusOK, result)
+			c.JSON(http.StatusOK, gin.H{
+				"saldo":  s,
+				"limite": l,
+			})
 		})
+
 	}
 
 	port := GetenvOrDefault("API_PORT", "3000")
