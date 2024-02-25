@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/subosito/gotenv"
@@ -44,7 +45,6 @@ func validaId(ctx *gin.Context) {
 		return
 	}
 
-	ctx.Set("id", id)
 	ctx.Next()
 }
 
@@ -98,7 +98,7 @@ func main() {
 
 	router.Use(gin.Recovery())
 
-	clientesRoute := router.Group("/clientes/:id", validaId)
+	clientesRoute := router.Group("/clientes/:id")
 
 	{
 		clientesRoute.GET("/extrato", func(c *gin.Context) {
@@ -106,7 +106,7 @@ func main() {
 			var l int
 			var ultimas string
 
-			err := dbRW.QueryRow(context.Background(), GERA_EXTRATO_QUERY, c.MustGet("id").(int)).Scan(&s, &l, &ultimas)
+			err := dbRW.QueryRow(context.Background(), GERA_EXTRATO_QUERY, c.Param("id")).Scan(&s, &l, &ultimas)
 
 			if err == pgx.ErrNoRows {
 				c.String(http.StatusNotFound, err.Error())
@@ -119,6 +119,7 @@ func main() {
 			}
 
 			jsonData, _ := json.Marshal(gin.H{
+				"ultimas_transacoes": nil,
 				"saldo": gin.H{
 					"total":        s,
 					"limite":       l,
@@ -126,22 +127,15 @@ func main() {
 				},
 			})
 
-			jsonDataStr := strings.TrimSuffix(string(jsonData), "}")
+			result := strings.Replace(string(jsonData), "null", ultimas, 1)
 
-			var sb strings.Builder
-
-			sb.WriteString(jsonDataStr)
-			sb.WriteString(", \"ultimas_transacoes\":")
-			sb.WriteString(ultimas)
-			sb.WriteString("}")
-
-			c.Data(http.StatusOK, gin.MIMEJSON, []byte(sb.String()))
+			c.Data(http.StatusOK, gin.MIMEJSON, []byte(result))
 		})
 
-		clientesRoute.POST("/transacoes", func(c *gin.Context) {
+		clientesRoute.POST("/transacoes", validaId, func(c *gin.Context) {
 			payload := AdicionaTransacaoReq{}
 
-			if err := c.BindJSON(&payload); err != nil {
+			if err := c.ShouldBindWith(&payload, binding.JSON); err != nil {
 				c.String(http.StatusUnprocessableEntity, "b")
 				return
 			}
@@ -165,9 +159,7 @@ func main() {
 			var s int
 			var l int
 
-			id := c.MustGet("id").(int)
-
-			err := dbRW.QueryRow(context.Background(), ATUALIZA_SALDO_QUERY, id, payload.Tipo, payload.Valor, payload.Descricao).Scan(&s, &l)
+			err := dbRW.QueryRow(context.Background(), ATUALIZA_SALDO_QUERY, c.Param("id"), payload.Tipo, payload.Valor, payload.Descricao).Scan(&s, &l)
 
 			if err != nil {
 				c.AbortWithError(http.StatusUnprocessableEntity, err)
