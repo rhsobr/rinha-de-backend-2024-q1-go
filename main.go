@@ -2,14 +2,15 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gin-gonic/gin/binding"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/subosito/gotenv"
@@ -48,7 +49,7 @@ func validaId(ctx *gin.Context) {
 }
 
 var ATUALIZA_SALDO_QUERY string = "SELECT s, l FROM atualiza_saldo($1,$2,$3,$4)"
-var GERA_EXTRATO_QUERY string = "SELECT result FROM extratos WHERE id = $1"
+var GERA_EXTRATO_QUERY string = "SELECT s, l, ultimas FROM extratos WHERE id = $1"
 
 func init() {
 	gotenv.Load()
@@ -101,9 +102,11 @@ func main() {
 
 	{
 		clientesRoute.GET("/extrato", func(c *gin.Context) {
-			var result string
+			var s int
+			var l int
+			var ultimas string
 
-			err := dbRW.QueryRow(context.Background(), GERA_EXTRATO_QUERY, c.MustGet("id").(int)).Scan(&result)
+			err := dbRW.QueryRow(context.Background(), GERA_EXTRATO_QUERY, c.MustGet("id").(int)).Scan(&s, &l, &ultimas)
 
 			if err == pgx.ErrNoRows {
 				c.String(http.StatusNotFound, err.Error())
@@ -115,30 +118,47 @@ func main() {
 				return
 			}
 
-			c.Data(http.StatusOK, gin.MIMEJSON, []byte(result))
+			jsonData, _ := json.Marshal(gin.H{
+				"saldo": gin.H{
+					"total":        s,
+					"limite":       l,
+					"data_extrato": time.Now().Format("2006-01-02T15:04:05.999Z"),
+				},
+			})
+
+			jsonDataStr := strings.TrimSuffix(string(jsonData), "}")
+
+			var sb strings.Builder
+
+			sb.WriteString(jsonDataStr)
+			sb.WriteString(", \"ultimas_transacoes\":")
+			sb.WriteString(ultimas)
+			sb.WriteString("}")
+
+			c.Data(http.StatusOK, gin.MIMEJSON, []byte(sb.String()))
 		})
 
 		clientesRoute.POST("/transacoes", func(c *gin.Context) {
 			payload := AdicionaTransacaoReq{}
 
-			if err := c.ShouldBindWith(&payload, binding.JSON); err != nil {
-				c.String(http.StatusUnprocessableEntity, "bind")
+			if err := c.BindJSON(&payload); err != nil {
+				c.String(http.StatusUnprocessableEntity, "b")
 				return
 			}
 
 			if payload.Tipo != "d" && payload.Tipo != "c" {
-				c.String(http.StatusUnprocessableEntity, "tipo")
+				c.String(http.StatusUnprocessableEntity, "t")
 				return
 			}
 
 			if payload.Valor <= 0 {
-				c.String(http.StatusUnprocessableEntity, "valor")
+				c.String(http.StatusUnprocessableEntity, "v")
 				return
 			}
 
 			lengthDescricao := len(payload.Descricao)
 			if lengthDescricao == 0 || lengthDescricao > 10 {
-				c.String(http.StatusUnprocessableEntity, "descricao")
+				c.String(http.StatusUnprocessableEntity, "d")
 				return
 			}
 

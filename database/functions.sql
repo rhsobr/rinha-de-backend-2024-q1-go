@@ -2,52 +2,34 @@ CREATE
 OR REPLACE VIEW extratos AS
 SELECT
     cl.id,
-    JSON_BUILD_OBJECT(
-        'saldo',
-        (
-            COALESCE(
-                JSON_BUILD_OBJECT(
-                    'total',
-                    cl.saldo,
-                    'limite',
-                    cl.limite,
-                    'data_extrato',
-                    to_char (
-                        NOW(),
-                        'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
-                    )
-                ),
-                NULL :: JSON
-            )
-        ),
-        'ultimas_transacoes',
-        (
-            SELECT
-                COALESCE(JSON_AGG(line), '[]' :: JSON)
-            FROM
-                (
-                    SELECT
-                        JSON_BUILD_OBJECT(
-                            'valor',
-                            t.valor,
-                            'tipo',
-                            t.tipo,
-                            'descricao',
-                            t.descricao,
-                            'realizada_em',
-                            to_char (t.realizada_em, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
-                        ) AS line
-                    FROM
-                        transacoes AS t
-                    WHERE
-                        t.cliente_id = cl.id
-                    ORDER BY
-                        t.realizada_em DESC
-                    LIMIT
-                        10
-                ) AS _
-        )
-    ) AS result
+    cl.saldo AS s,
+    cl.limite AS l,
+    (
+        SELECT
+            COALESCE(JSON_AGG(line), '[]' :: JSON)
+        FROM
+            (
+                SELECT
+                    JSON_BUILD_OBJECT(
+                        'valor',
+                        t.valor,
+                        'tipo',
+                        t.tipo,
+                        'descricao',
+                        t.descricao,
+                        'realizada_em',
+                        to_char (t.realizada_em, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+                    ) AS line
+                FROM
+                    transacoes AS t
+                WHERE
+                    t.cliente_id = cl.id
+                ORDER BY
+                    t.realizada_em DESC
+                LIMIT
+                    10
+            ) AS _
+    ) AS ultimas
 FROM
     clientes cl;
 
@@ -141,7 +123,7 @@ OR REPLACE FUNCTION adiciona_transacao() RETURNS TRIGGER AS $t$ BEGIN
                         END
                     ) AS id
             ),
-            clock_timestamp()
+            CLOCK_TIMESTAMP()
         ) ON CONFLICT (id, cliente_id) DO
     UPDATE
     SET
